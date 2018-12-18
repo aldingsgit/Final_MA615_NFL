@@ -4,4 +4,4 @@
 2) Summary slide deck in RMD, HTML, and PDF format (Ding.a_ioslides_vF)
 3) Interactive web app (Ding.a_Shiny_vF/app)
 
-Please note that the following error may occur if the website blocks the scrape request by rvest: "Error in open.connection(x, "rb") : HTTP error 503."
+Please note encounter the following error if the website blocks my scrape request - if this happens try running in a few minutes and it should work: "Error in open.connection(x, "rb") : HTTP error 503."
