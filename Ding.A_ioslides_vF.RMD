@@ -1,0 +1,529 @@
+---
+title: "An Analysis of Reported Heights and Weights of Current NFL Players"
+author: "Albert Ding"
+date: "December 2018"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r, echo = FALSE, warning=FALSE, results='hide',message=FALSE}
+#Loading libraries:
+pacman::p_load(
+tidyverse,
+data.table,
+XML,
+RCurl,
+httr,
+rvest,
+magrittr,
+benford.analysis,
+gridExtra,
+knitr,
+png,
+jpeg
+)
+```
+
+```{r, echo = FALSE, warning=FALSE, results='hide',message=FALSE}
+#Scrape and clean data on NFL rosters
+
+#vector of URLs below:
+
+nfl_teams <- c("arizona-cardinals", "atlanta-falcons", "baltimore-ravens", "buffalo-bills", "carolina-panthers", "chicago-bears", "cincinnati-bengals", "cleveland-browns", "dallas-cowboys", "denver-broncos","detroit-lions","green-bay-packers","houston-texans","indianapolis-colts","jacksonville-jaguars","kansas-city-chiefs","los-angeles-chargers","los-angeles-rams","miami-dolphins", "minnesota-vikings","new-england-patriots","new-orleans-saints","new-york-giants","new-york-jets","oakland-raiders","philadelphia-eagles","pittsburgh-steelers","san-francisco-49ers","seattle-seahawks","tampa-bay-buccaneers","tennessee-titans","washington-redskins") 
+
+result  <- list() #formatting result as list
+
+#for loop to extract tables of rosters below
+       
+for(i in 1:length(nfl_teams)) {
+   url <- paste0("https://www.lineups.com/nfl/roster/", nfl_teams[i])
+   tble <- read_html(url) %>%
+      html_node("table") %>%
+      html_table(fill = TRUE)
+   
+   result[[i]] <- tble #list of 32 tables - 1 for each team
+   
+   result[[i]]['Team_name'] = nfl_teams[i] #assigning variable to identify what team each player is on
+}
+
+all_teams <- do.call("rbind", result) %>% #merging all 32 tables
+    mutate(
+    Name1 = sub("^(\\S*\\s+\\S+).*", "\\1", Name)) 
+    #creating new column of names because existing has dulplicate of name from picture of player     on website
+
+all_teams$Name <- NULL #deleting original name column
+
+colnames(all_teams)[16] <- "Name" #changing name1 to name
+
+clean1<-all_teams[c(16,1:15)] %>% #reorder columns to put name first
+    filter(Height != 0 & Weight != 0) %>% #used to extract inches
+    mutate(Height_length = nchar(Height)) %>% #see whether extracting 1 or 2 digits for inches
+    mutate(Height_ft = as.numeric(substr(Height, start = 1, stop = 1)),
+           Height_in = 
+              ifelse(Height_length == 4,
+              as.numeric(substr(Height, start = 3, stop = 3)),
+              as.numeric(substr(Height, start = 3, stop = 4)))) %>% #extracting inches
+    mutate(Height_inches = Height_ft*12 + Height_in) #converting to inches
+
+clean1 <- subset(clean1,Name != "Andrew East") #Removing miscategorized backup long snapper
+
+#Renaming columns for dplyr formatting
+colnames(clean1)[colnames(clean1)=="Exp."] <- "Exp"
+colnames(clean1)[colnames(clean1)=="Draft Round"] <- "Draft_round"
+colnames(clean1)[colnames(clean1)=="Draft Pick"] <- "Draft_pick"
+
+#Selecting relevant columns for final data frame
+Final <- select(clean1, Name, Pos, Team_name, Height_inches, Weight, Age, Exp, Rating, Depth, Drafted, Draft_round, Draft_pick, College)
+
+```
+
+## Summary
+
+- <font size="4">Project examines heights and weights of current NFL players for inaccuracies arising from self-reported nature of figures</font>
+
+- <font size="4">Neither player heights, nor player weights follow Benford distribution, but they should both be approximately normal if their disributions are similar to those of the overall population of adult males</font>
+
+- <font size="4">Population further segmented into groups by player position and examined for normality</font>
+
+- <font size="4">For offensive linemen weight distribution, I reproduced the Benford getSuspects function by running  Chi-squared tests on different quantiles to see which ones deviated the most from the expected normal densities</font>
+
+- <font size="4">After significant analytical investigation, I visualize and explore other relationships in the dataset</font>
+
+## Data Scraped from Sports Analytics Website Lineups.com
+
+```{r, echo = FALSE, warning=FALSE, results='hide',message=FALSE}
+x <- "https://www.lineups.com/articles/wp-content/uploads/2017/10/nfl-risers-fallers-2.jpg"
+download.file(x,'x.jpg', mode = 'wb')
+jj <- readJPEG("x.jpg",native=TRUE)
+plot(0:1,0:1,type="n",ann=FALSE,axes=FALSE)
+rasterImage(jj,0,0,1,1)
+
+```
+
+## Player Heights Don't Follow Benford Distribution and Range from 66 to 81 Inches  
+
+```{r, echo = FALSE, warning=FALSE, results='hide',message=FALSE}
+#benford analysis on height 
+bfd.height <- benford(Final$Height_inches)
+
+plot(bfd.height)
+```
+
+## Player Weights Don't Follow Benford Either and Range from 149 to 362 lbs  
+
+```{r, echo = FALSE, warning=FALSE, results='hide',message=FALSE}
+#benford analysis on weight 
+bfd.weight <- benford(Final$Weight)
+
+plot(bfd.weight)
+
+```
+
+## Weights Appear Multi-Modal While Heights Have Bell Shape   
+
+```{r, echo = FALSE, warning=FALSE, results='hide',message=FALSE}
+Weight_hist1<- ggplot(Final) +
+    geom_histogram(aes(x = Weight, y = ..count..),
+          binwidth = 5, fill = "grey", color = "black") +
+    ggtitle("Distribution of NFL Players Weights\n(5lb Bins)") +
+    ylab("\nCount") +
+    xlab("Weight in lbs\n") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    coord_flip() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+ 
+    geom_vline(xintercept = mean(Final$Weight), color="red") +
+    geom_vline(xintercept = mean(Final$Weight) + sd(Final$Weight), color="blue") +
+    geom_vline(xintercept = mean(Final$Weight) - sd(Final$Weight), color="blue")  
+
+Height_hist1<- ggplot(Final) +
+    geom_histogram(aes(x = Height_inches, y = ..count..),
+          binwidth = 1, fill = "grey", color = "black") +
+    ggtitle("Distribution of NFL Players Heights\n(1 inch Bins)") +
+    ylab("\nCount") +
+    xlab("Height in Inches\n") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    coord_flip() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+    geom_vline(xintercept = mean(Final$Height_inches), color="red")+ 
+    geom_vline(xintercept = mean(Final$Height_inches) + sd(Final$Height_inches), color="blue") +
+    geom_vline(xintercept = mean(Final$Height_inches) - sd(Final$Height_inches), color="blue") 
+
+grid.arrange(Weight_hist1,Height_hist1,nrow=1)
+```
+
+## Q-Q Plots Indicate Neither Are Drawn from Normally Distributed Population  
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+set.seed(2345)
+Final_obs<-nrow(Final)
+Final$Height_inches_uniform<- Final$Height_inches+runif(Final_obs, min = -0.5, max = 0.5)
+
+par(mfrow=c(1,2))
+qqnorm(Final$Height_inches_uniform, main="Normal Q-Q Plot of Heights\n(Adjusted - See Report)", ylab = "Sample Quantiles - Height in Inches"); qqline(Final$Height_inches_uniform)
+qqnorm(Final$Weight,  main="Normal Q-Q Plot of Weights", ylab = "Sample Quantiles - Weight in lbs"); qqline(Final$Weight)
+
+```
+
+## Player Heights Were Adjusted With Randomly Drawn Decimal Endings To Address Discreteness 
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+par(mfrow=c(1,2))
+qqnorm(Final$Height_inches,  main="Normal Q-Q Plot of Heights\n(Unadjusted)", ylab = "Sample Quantiles - Height in Inches"); qqline(Final$Height_inches)
+qqnorm(Final$Height_inches_uniform, main="Normal Q-Q Plot of Heights\n(Adjusted)", ylab = "Sample Quantiles - Height in Inches"); qqline(Final$Height_inches_uniform)
+
+```
+
+## Shapiro-Wilk Test of Normality Agrees They're Not Normally Distributed
+
+- <font size="4">Shapiro-Wilk tests null hypothesis that a sample came from a normally distributed population. p-value is less than 0.05 so we can reject the null hypothesis at 95% LOC that height and weight were drawn from normally distributed population (See report for details)</font>
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+par(mfrow=c(1,2))
+shapiro.test(Final$Weight)
+shapiro.test(Final$Height_inches)
+
+```
+
+## Conclusions from Basic Visualizations of Height and Weights
+
+- <font size="4">Player weights were not normally distributed and heights appear off as well</font>
+
+- <font size="4">Height distribution has elements of discreteness caused by rounding to the nearest inch in reported height values</font>
+
+- <font size="4">There were only 16 different values for height: 66 inches to 81 inches inclusive</font>
+
+- <font size="4">I addressed height discreteness by adding decimal endings from uniform distribution centered at zero and plus / minus half an inch to mimic rounding in real life</font>
+
+- <font size="4">Next, I'll analyze the distribution of heights and weights by position</font>
+
+## Quarterback Height and Weight Distributions Look Bell Shaped
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+QB_Final <- filter(Final, Pos == "QB")
+
+Weight_hist_QB<- ggplot(QB_Final) +
+    geom_histogram(aes(x = Weight, y = ..count..),
+          binwidth = 5, fill = "grey", color = "black") +
+    ggtitle("QB Weights\n(5lb Bins)") +
+    ylab("\nCount") +
+    xlab("Weights\n") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    coord_flip() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+    geom_vline(xintercept = mean(QB_Final$Weight), color="red") +
+    geom_vline(xintercept = mean(QB_Final$Weight) + sd(QB_Final$Weight), color="blue") +
+    geom_vline(xintercept = mean(QB_Final$Weight) - sd(QB_Final$Weight), color="blue")  
+
+Height_hist_QB<- ggplot(QB_Final) +
+    geom_histogram(aes(x = Height_inches, y = ..count..),
+          binwidth = 1, fill = "grey", color = "black") +
+    ggtitle("QB Heights\n(1 inch Bins)") +
+    ylab("\nCount") +
+    xlab("Heights\n") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    coord_flip() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+    geom_vline(xintercept = mean(QB_Final$Height_inches), color="red") +
+    geom_vline(xintercept = mean(QB_Final$Height_inches) + sd(QB_Final$Height_inches), color="blue") +
+    geom_vline(xintercept = mean(QB_Final$Height_inches) - sd(QB_Final$Height_inches), color="blue")  
+
+grid.arrange(Weight_hist_QB,Height_hist_QB, nrow=1)
+```
+
+## QQ Plots for Quarterback Suggest Normal Distribution  
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+QB_observations <- nrow(QB_Final)
+set.seed(111)
+Uniform_decimals_QB <- runif(QB_observations, min =  -0.5, max = 0.5)
+QB_Final$Height_inches_uniform<- QB_Final$Height_inches + Uniform_decimals_QB
+
+par(mfrow=c(1,2))
+qqnorm(QB_Final$Height_inches_uniform,  main="Normal Q-Q Plot of QB Heights\n(Adjusted)", ylab = "Sample Quantiles - Height in Inches"); qqline(QB_Final$Height_inches_uniform)
+qqnorm(QB_Final$Weight,  main="Normal Q-Q Plot of QB Weights", ylab = "Sample Quantiles - Weight in lbs"); qqline(QB_Final$Weight)
+
+
+```
+
+## Shapiro-Wilk Tests Agrees That Quarterback Distributions May Be Normal
+
+- <font size="4">Both have p-values far greater than 0.05. Notably, if the heights are not adjusted, the p-value becomes small enough to reject the null hypothesis.</font>
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+par(mfrow=c(1,2))
+shapiro.test(QB_Final$Weight)
+shapiro.test(QB_Final$Height_inches_uniform)
+```
+
+## In Full Report and Shiny App, We Also Examine Distributions, QQ-Plots, and Tests of Normality for Other Positions
+
+- <font size="4">Omitted from report for sake of compactness and brevity</font>
+
+- <font size="4">We'll look at offensive linemen next for which we apply further testing on to retrieve suspects</font>
+
+## Offensive Line: Distributions Look Bell Shaped But Skewed For Weight 
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+OL_Final <- filter(Final, Pos == "OT"|Pos == "OG"|Pos == "OL"|Pos == "C")
+
+Weight_hist_OL<- ggplot(OL_Final) +
+    geom_histogram(aes(x = Weight, y = ..count..),
+          binwidth = 5, fill = "grey", color = "black") +
+    ggtitle("Offensive Lineman Weights\n(5lb Bins)") +
+    ylab("\nDensity") +
+    xlab("Weights\n") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    coord_flip() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+    geom_vline(xintercept = mean(OL_Final$Weight), color="red") +
+    geom_vline(xintercept = mean(OL_Final$Weight) + sd(OL_Final$Weight), color="blue") +
+    geom_vline(xintercept = mean(OL_Final$Weight) - sd(OL_Final$Weight), color="blue") 
+
+Height_hist_OL<- ggplot(OL_Final) +
+    geom_histogram(aes(x = Height_inches, y = ..count..),
+          binwidth = 1, fill = "grey", color = "black") +
+    ggtitle("Offensive Lineman Heights\n(1 inch Bins)") +
+    ylab("\nDensity") +
+    xlab("Heights\n") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    coord_flip() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+    geom_vline(xintercept = mean(OL_Final$Height_inches), color="red") +
+    geom_vline(xintercept = mean(OL_Final$Height_inches) + sd(OL_Final$Height_inches), color="blue") +
+    geom_vline(xintercept = mean(OL_Final$Height_inches) - sd(OL_Final$Height_inches), color="blue")  
+
+grid.arrange(Weight_hist_OL,Height_hist_OL, nrow=1)
+```
+
+## Q-Q Plots Indicate Height Close to Normal But Weight is Not
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+OL_obs <- nrow(OL_Final)
+
+set.seed(1222)
+
+Uniform_decimals_OL <- runif(OL_obs, min =  -0.5, max = 0.5)
+
+OL_Final$Height_inches_uniform<- OL_Final$Height_inches + Uniform_decimals_OL
+
+par(mfrow=c(1,2))
+qqnorm(OL_Final$Weight,  main="Normal Q-Q Plot of O-Line Weight", ylab = "Sample Quantiles - Weight in Pounds"); qqline(OL_Final$Weight)
+qqnorm(OL_Final$Height_inches_uniform, main="Normal Q-Q Plot of O-Line Height\n(Adjusted)", ylab = "Sample Quantiles - Height in Inches"); qqline(OL_Final$Height_inches_uniform)
+```
+
+## Shapiro-Wilk Tests Agrees Offensive Line Height May be Normal But Not Weight
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+shapiro.test(OL_Final$Weight)
+shapiro.test(OL_Final$Height_inches_uniform)
+```
+
+## Using The Chi-Squared Test Statistic, We'll Find Weight Bins With The Largest Deviations  
+
+- <font size="4">In histogram, weights bucketed in five pound increments with 85 different values in that range so 17 buckets total</font>
+
+- <font size="4">Using each bucket, we can calculate expected area under the curve from pnorm function and multiply by total sample size to get how many samples expected in that quantile</font>
+
+- <font size="4">From there, we can calculate observed minus expected and generate chi-squared values for each bin</font>
+
+- <font size="4">We then select the bins with the largest chi squared test statistic values - this is how the benford analysis package selects suspects</font>
+
+
+```{r, echo = FALSE, warning=FALSE, results='hide',message=FALSE}
+Mean_Weight_OL<-mean(OL_Final$Weight)
+SD_Weight_OL<-sd(OL_Final$Weight)
+
+#BUCKET ONE (277-281 lbs)
+Bucket_one_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 277 &  OL_Final$Weight <= 281.5,]))
+Bucket_one_OL_weight_theoretical<-pnorm(q = 281, mean = Mean_Weight_OL, sd = SD_Weight_OL)*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_one_deviation<- Bucket_one_OL_weight_actual - Bucket_one_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_1<-Bucket_one_deviation^2 / Bucket_one_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET TWO (282-286 lbs)
+Bucket_two_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 281.5 &  OL_Final$Weight <= 286.5,]))
+Bucket_two_OL_weight_theoretical<-(pnorm(q = 286, mean = Mean_Weight_OL, sd = SD_Weight_OL)-pnorm(q = 282, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_two_deviation<- Bucket_two_OL_weight_actual - Bucket_two_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_2<-Bucket_two_deviation^2 / Bucket_two_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET THREE (287-291 lbs)
+Bucket_three_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 286.5 &  OL_Final$Weight <= 291.5,]))
+Bucket_three_OL_weight_theoretical<-(pnorm(q = 291, mean = Mean_Weight_OL, sd = SD_Weight_OL)-pnorm(q = 287, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_three_deviation<- Bucket_three_OL_weight_actual - Bucket_three_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_3<-Bucket_three_deviation^2 / Bucket_three_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET FOUR (292-296 lbs)
+Bucket_four_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 291.5 &  OL_Final$Weight <= 296.5,]))
+Bucket_four_OL_weight_theoretical<-(pnorm(q = 296, mean = Mean_Weight_OL, sd = SD_Weight_OL)-pnorm(q = 292, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_four_deviation<- Bucket_four_OL_weight_actual - Bucket_four_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_4<-Bucket_four_deviation^2 / Bucket_four_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET FIVE (297-301 lbs)
+Bucket_five_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 296.5 &  OL_Final$Weight <= 301.5,]))
+Bucket_five_OL_weight_theoretical<-(pnorm(q = 301, mean = Mean_Weight_OL, sd = SD_Weight_OL)-pnorm(q = 296, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_five_deviation<- Bucket_five_OL_weight_actual - Bucket_five_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_5<-Bucket_five_deviation^2 / Bucket_five_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET SIX (302-306 lbs)
+Bucket_six_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 301.5 &  OL_Final$Weight <= 306.5,]))
+Bucket_six_OL_weight_theoretical<-(pnorm(q = 306, mean = Mean_Weight_OL, sd = SD_Weight_OL)-pnorm(q = 302, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_six_deviation<- Bucket_six_OL_weight_actual - Bucket_six_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_6<-Bucket_six_deviation^2 / Bucket_six_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET SEVEN (307-311 lbs)
+Bucket_seven_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 306.5 &  OL_Final$Weight <= 311.5,]))
+Bucket_seven_OL_weight_theoretical<-(pnorm(q = 311, mean = Mean_Weight_OL, sd = SD_Weight_OL)-pnorm(q = 307, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_seven_deviation<- Bucket_seven_OL_weight_actual - Bucket_seven_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_7<-Bucket_seven_deviation^2 / Bucket_seven_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET EIGHT (312-316 lbs)
+Bucket_eight_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 311.5 &  OL_Final$Weight <= 316.5,]))
+Bucket_eight_OL_weight_theoretical<-(pnorm(q = 316, mean = Mean_Weight_OL, sd = SD_Weight_OL)-pnorm(q = 312, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_eight_deviation<- Bucket_eight_OL_weight_actual - Bucket_eight_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_8<-Bucket_eight_deviation^2 / Bucket_eight_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET NINE (317-321 lbs)
+Bucket_nine_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 316.5 &  OL_Final$Weight <= 321.5,]))
+Bucket_nine_OL_weight_theoretical<-(pnorm(q = 321, mean = Mean_Weight_OL, sd = SD_Weight_OL)-pnorm(q = 317, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_nine_deviation<- Bucket_nine_OL_weight_actual - Bucket_nine_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_9<-Bucket_nine_deviation^2 / Bucket_nine_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET TEN (322-326 lbs)
+Bucket_ten_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 321.5 &  OL_Final$Weight <= 326.5,]))
+Bucket_ten_OL_weight_theoretical<-(pnorm(q = 326, mean = Mean_Weight_OL, sd = SD_Weight_OL)-pnorm(q = 322, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_ten_deviation<- Bucket_ten_OL_weight_actual - Bucket_ten_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_10<-Bucket_ten_deviation^2 / Bucket_ten_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET ELEVEN (327-331 lbs)
+Bucket_eleven_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 326.5 &  OL_Final$Weight <= 331.5,]))
+Bucket_eleven_OL_weight_theoretical<-(pnorm(q = 331, mean = Mean_Weight_OL, sd = SD_Weight_OL)-pnorm(q = 327, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_eleven_deviation<- Bucket_eleven_OL_weight_actual - Bucket_eleven_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_11<-Bucket_eleven_deviation^2 / Bucket_eleven_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET TWELVE (332-336 lbs)
+Bucket_twelve_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 331.5 &  OL_Final$Weight <= 336.5,]))
+Bucket_twelve_OL_weight_theoretical<-(pnorm(q = 336, mean = Mean_Weight_OL, sd = SD_Weight_OL)-pnorm(q = 332, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_twelve_deviation<- Bucket_twelve_OL_weight_actual - Bucket_twelve_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_12<-Bucket_twelve_deviation^2 / Bucket_twelve_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET THIRTEEN (337-341 lbs)
+Bucket_thirteen_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 336.5 &  OL_Final$Weight <= 341.5,]))
+Bucket_thirteen_OL_weight_theoretical<-(pnorm(q = 341, mean = Mean_Weight_OL, sd = SD_Weight_OL)-pnorm(q = 337, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_thirteen_deviation<- Bucket_thirteen_OL_weight_actual - Bucket_thirteen_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_13<-Bucket_thirteen_deviation^2 / Bucket_thirteen_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET FOURTEEN (342-346 lbs)
+Bucket_fourteen_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 341.5 &  OL_Final$Weight <= 346.5,]))
+Bucket_fourteen_OL_weight_theoretical<-(pnorm(q = 346, mean = Mean_Weight_OL, sd = SD_Weight_OL)-pnorm(q = 341, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_fourteen_deviation<- Bucket_fourteen_OL_weight_actual - Bucket_fourteen_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_14<-Bucket_fourteen_deviation^2 / Bucket_fourteen_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET FIFTEEN (347-351 lbs)
+Bucket_fifteen_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 346.5 &  OL_Final$Weight <= 351.5,]))
+Bucket_fifteen_OL_weight_theoretical<-(pnorm(q = 351, mean = Mean_Weight_OL, sd = SD_Weight_OL)-pnorm(q = 347, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_fifteen_deviation<- Bucket_fifteen_OL_weight_actual - Bucket_fifteen_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_15<-Bucket_fifteen_deviation^2 / Bucket_fifteen_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET SIXTEEN (352-356 lbs)
+Bucket_sixteen_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 351.5 &  OL_Final$Weight <= 356.5,]))
+Bucket_sixteen_OL_weight_theoretical<-(pnorm(q = 356, mean = Mean_Weight_OL, sd = SD_Weight_OL)-pnorm(q = 352, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_sixteen_deviation<- Bucket_sixteen_OL_weight_actual - Bucket_sixteen_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_16<-Bucket_sixteen_deviation^2 / Bucket_sixteen_OL_weight_theoretical #Calculating chi squared for bucket
+
+#BUCKET SEVENTEEN (357-361 lbs)
+Bucket_seventeen_OL_weight_actual<-nrow((OL_Final[OL_Final$Weight >= 356.5 &  OL_Final$Weight <= 361.5,]))
+Bucket_seventeen_OL_weight_theoretical<-(1-pnorm(q = 357, mean = Mean_Weight_OL, sd = SD_Weight_OL))*nrow(OL_Final) #Number of observations in set times expected CDF within the bucket
+Bucket_seventeen_deviation<- Bucket_seventeen_OL_weight_actual - Bucket_seventeen_OL_weight_theoretical #Observed - actual
+OL_Chi_squared_17<-Bucket_seventeen_deviation^2 / Bucket_seventeen_OL_weight_theoretical #Calculating chi squared for bucket
+
+```
+
+## Biggest Suspects Are in the Heaviest Quantile - See Below
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+Chisq_OL<-rbind(OL_Chi_squared_1,OL_Chi_squared_2,OL_Chi_squared_3,OL_Chi_squared_4,OL_Chi_squared_5,OL_Chi_squared_6,OL_Chi_squared_7,OL_Chi_squared_8,OL_Chi_squared_9,OL_Chi_squared_10,OL_Chi_squared_11,OL_Chi_squared_12,OL_Chi_squared_13,OL_Chi_squared_14,OL_Chi_squared_15,OL_Chi_squared_16,OL_Chi_squared_17)
+
+plot(Chisq_OL,
+     main = "Chi Squared Difference by Weight Bins for Offensive Linemen\n",
+     xlab="Weight Bins",
+     ylab = "Chi-squared Values",
+     pch= 21, bg = 73)
+```
+
+## These players are Marcus Cannon of the New England Patriots and Zach Banner of the Pittsburgh Steelers
+
+```{r}
+y <- "https://cdn.vox-cdn.com/thumbor/Rce2rfWa4LI49mBpOu5F4yhd2Qw=/0x224:3141x1991/1600x900/cdn.vox-cdn.com/uploads/chorus_image/image/52061629/usa_today_9667961.0.jpeg"
+download.file(y,'y.jpg', mode = 'wb')
+jj <- readJPEG("y.jpg",native=TRUE)
+
+z <- "https://steelersdepot.com/wp-content/uploads/2018/08/Zach-Banner.jpg"
+download.file(z,'z.jpg', mode = 'wb')
+kk <- readJPEG("z.jpg",native=TRUE)
+
+par(mfrow=c(1,2))
+plot(0:1,0:1,type="n",ann=FALSE,axes=FALSE)
+rasterImage(jj,0,0,1,1)
+plot(0:1,0:1,type="n",ann=FALSE,axes=FALSE)
+rasterImage(kk,0,0,1,1)
+```
+
+## Both players Struggled With Weight in the Past and Have Weight-Related Incentives in Contracts
+
+- <font size="4">Both players are listed at varying weights depending on the website and time period and have struggled with being too heavy in the past</font>
+
+- <font size="4">Both also have performance incentives in their contract for making a certain weight during training camp</font>
+
+- <font size="4">Our method of getting suspects via the largest Chi-Squared values appears somewhat successful in finding unusual observations in this test case</font>
+
+## Some Other Selected Relationships Visualized (More in Report/Shiny) - 1
+
+```{r, echo = FALSE, warning=FALSE, results='hide',message=FALSE}
+ggplot(Final,aes(x = Height_inches, y = Weight, color = Pos)) +
+  geom_point(position = "jitter", alpha = 0.3) +
+  geom_smooth(method = lm, se = FALSE) +
+  ggtitle("NFL Players Height versus Weight") +
+    ylab("Weight in lbs\n") +
+    xlab("\nHeight in inches")  +
+    theme(plot.title = element_text(hjust = 0.5))
+```
+
+## Some Other Selected Relationships Visualized (More in Report/Shiny) - 2
+
+```{r, echo = FALSE, warning=FALSE, results='hide',message=FALSE}
+ggplot(Final,aes(x = Height_inches, y = Weight, color = Team_name)) +
+  geom_point(position = "jitter", alpha = 0.3) +
+  geom_smooth(method = lm, se = FALSE) +
+  ggtitle("NFL Players Height versus Weight") +
+    ylab("Weight in lbs\n") +
+    xlab("\nHeight in inches")  +
+    theme(plot.title = element_text(hjust = 0.5))
+```
+
+## Some Other Selected Relationships Visualized (More in Report/Shiny) - 3
+
+```{r, echo = FALSE, warning=FALSE, results='hide',message=FALSE}
+Final_Depth <- filter(Final, Depth <= 4)
+
+ggplot(na.omit(Final_Depth), aes(x = Height_inches, y = factor(Draft_round))) + 
+      geom_jitter(aes(color=factor(Depth)),alpha=0.5) +     
+      ggtitle("NFL Players Height versus Draft Round") +
+      labs(x = "\nHeight in inches", y = "Draft Round\n", color = "Position on Depth Chart") +
+      theme(plot.title = element_text(hjust = 0.5))
+```
+
+## Some Other Selected Relationships Visualized (More in Report/Shiny) - 4
+
+```{r, echo = FALSE, warning=FALSE, results='hide',message=FALSE}
+ggplot(data = na.omit(Final)) + 
+  geom_bar(mapping = aes(x = Team_name, fill = factor(Draft_round)),position = "fill") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust = 1)) + 
+  scale_fill_discrete(labels = 
+          c('One','Two','Three','Four','Five','Six','Seven','Undrafted')) +     
+      ggtitle("Compositions of Draft Rounds by NFL Team Roster\n") +
+      labs(x = "\nTeam Name", y = "Proportion\n", fill = "Draft Round") +
+      theme(plot.title = element_text(hjust = 0.5))
+
+```
